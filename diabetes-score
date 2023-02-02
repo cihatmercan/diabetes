@@ -1,0 +1,391 @@
+## Work Problem
+
+# It is desired to develop a machine learning model that can predict whether people have diabetes
+# when their characteristics are specified. Before developing the model, 
+# we will perform the necessary data analysis and feature engineering steps.
+
+## Data Set Story
+
+The dataset is part of a larger dataset held at the National Institutes of Diabetes and Digestive and Kidney Diseases in the USA. 
+# It is the data used for a diabetes survey of Pima Indian women aged 21 years and older living in the city of Phoenix, 
+# the 5th largest city in the State of Arizona, USA. The target variable is "outcome", 
+# where 1 indicates a positive diabetes test result and 0 indicates a negative test result.
+
+# Pregnancies Number of pregnancies
+# Glucose: 2-hour plasma glucose concentration in oral glucose tolerance test
+# Blood Pressure Blood Pressure (small blood pressure) (mm Hg)
+# SkinThickness Skin Thickness
+# Insulin 2-hour serum insulin (mu U/ml)
+# DiabetesPedigreeFunction: a function that scores the likelihood of diabetes based on family history
+# BMI Body mass index
+# Age Age (years)
+# Outcome: Have the disease (1) or not (0)
+
+## Task 1: Exploratory Data Analysis
+
+# Step 1: Overall Picture
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+#pip install missingno
+import missingno as msno
+from datetime import date
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, RobustScaler
+
+def load_diabetes():
+    data = pd.read_csv("diabetes.csv")
+    return data
+
+df = load_diabetes()
+df.head()
+
+def check_df(dataframe, head=5):
+    print("################## Shape ######################")
+    print(dataframe.shape)
+    print("################## Type ######################")
+    print(dataframe.dtypes)
+    print("################## Head ######################")
+    print(dataframe.head(head))
+    print("################## Head ######################")
+    print(dataframe.tail(head))
+    print("################## NA ######################")
+    print(dataframe.isnull().sum())
+    print("################## Quantiles ######################")
+    print(dataframe.describe([0, 0.05, 0.5, 0.95, 0.99, 1]).T)
+
+check_df(df)
+
+# Step 2: Capturing numeric and categorical variables
+
+def grab_col_names(dataframe, cat_th=10, car_th=20):
+    """
+    Returns the names of categorical, numeric and cardinal variables in the data set.
+    
+    Parameters
+    ------------------
+    dataframe: dataframe
+    cat_th: int, float
+        class threshold for variables that appear numeric but are categorical
+    car_th: int, float
+        class threshold for categorical but cardinal variables
+    
+    Returns
+    ------------------
+    cat_cols: list
+        list of categorical variables
+    num_cols: list
+        numeric variable list
+    cat_but_car: list
+        list of variables that appear categorical but are cardinal
+        
+    Notes
+    ------------------
+    cat_cols + num_cols + cat_but_car = total number of variables
+    The num_but_cat_cols list is inside cat_cols
+    
+    """
+    cat_cols = [col for col in df.columns if str(df[col].dtype) in ["category", "bool", "object"] ]
+    num_but_cat_cols = [col for col in df.columns if (str(df[col].dtype) in ["int64", "float64"])
+                   and (df[col].nunique() < 10)]
+    cat_but_car_cols = [col for col in df.columns if str(df[col].dtype) in ["category", "object"] 
+                    and df[col].nunique()>20] 
+    cat_cols = cat_cols + num_but_cat_cols
+    cat_cols = [col for col in cat_cols if col not in cat_but_car_cols]
+    
+    num_cols = [col for col in df.columns if df[col].dtypes in ["int", "float"]]
+    num_cols = [col for col in num_cols if col not in cat_cols]
+
+    print(f"Observations: {dataframe.shape[0]}")
+    print(f"Variables: {dataframe.shape[1]}")
+    print(f"cat_cols: {len(cat_cols)}")
+    print(f"num_cols: {len(num_cols)}")
+    print(f"cat_but_car_cols: {len(cat_but_car_cols)}")
+    print(f"num_but_cat_cols: {len(num_but_cat_cols)}")
+    
+    return cat_cols, num_cols, cat_but_car_cols
+
+cat_cols, num_cols, cat_but_car_cols = grab_col_names(df)
+cat_cols, num_cols
+
+# Step 3: Analysis of numeric and categorical variables.
+
+# this function summarizes the categoric variables entered into it and also gives the possibility to plot their graphs
+def cat_summary(dataframe, col_name, plot=False):
+    print(pd.DataFrame({col_name: dataframe[col_name].value_counts(),
+                       "Ratio": 100 * dataframe[col_name].value_counts()/len(dataframe)}))
+    print("###############################################")
+    
+    if plot:
+        sns.countplot(x=dataframe[col_name], data=dataframe)
+        plt.show(block=True)
+        
+[cat_summary(df, col, True) for col in cat_cols]
+
+# this function summarizes the numeric variables entered into it and also gives the possibility to plot their graphs
+def num_summary(dataframe, numerical_cols, plot=False):
+    quantiles = [0.05, 0.1, 0.2, 0.3, 0.4, 0.9, 1]
+    print(dataframe[numerical_cols].describe(quantiles).T)
+    
+    if plot:
+        dataframe[num_cols].hist()
+        plt.xlabel(numerical_cols)
+        plt.title(numerical_cols)
+        plt.show(block=True)
+        
+[num_summary(df, col, True) for col in num_cols]
+
+# Step 4: Analysis of the target variables (average of the target variable according to categorical variables, 
+# average of numerical variables according to the target variable)
+
+# we can write a function to examine the relationship of our target variable with other categorical variables
+def target_summary_with_cat(dataframe, target, categorical_col):
+    print(pd.DataFrame({"Outcome": dataframe.groupby(categorical_col)[target].mean()}))
+    
+# We can also examine the relationship between our target variable and other categorical variables as follows
+for col in cat_cols:
+    target_summary_with_cat(df, "Outcome", col)
+
+# we can write a function to examine the relationship between our target variable and numeric variables
+def target_summary_with_num(dataframe, target, numerical_col):
+    print(dataframe.groupby(target).agg({numerical_col: "mean"}), end="\n\n\n")
+    
+for col in num_cols:
+    target_summary_with_num(df, "Outcome", col)
+
+# Step 5: Correlation analysis.
+
+df = load_diabetes()
+df.corr()
+
+sns.set(rc={"figure.figsize": (12, 12)})
+sns.heatmap(df.corr(), annot=True, cmap="RdBu").set(title='Correlation Matrix')
+plt.show()
+
+## Task 2: Feature Engineering
+
+# Step 1: There are no missing observations in the data set, but observation units
+# containing 0 values in variables such as Glucose, Insulin, etc. may represent missing values. 
+# For example, a person's glucose or insulin value cannot be 0. Considering this situation, 
+# we can assign the zero values as NaN in the relevant values and then apply the operations to the missing values.
+
+# we know that only Pregnancies and Outcome variables can take the value zero
+# we replace the zero values in all other variables with NaN values
+zero_cols = [col for col in df.columns if (df[col].min() == 0 and col not in ["Pregnancies", "Outcome"])]
+[df[col].replace(0, np.nan, inplace=True) for col in zero_cols]
+
+df.isnull().sum()
+
+# Step 2: Missing values
+
+def missing_values_table(dataframe, na_name=False):
+    na_cols = [col for col in df.columns if df[col].isnull().sum() > 0]
+    n_miss = dataframe[na_cols].isnull().sum().sort_values(ascending=False)
+    ratio = (dataframe[na_cols].isnull().sum()/dataframe.shape[0] * 100).sort_values(ascending=False)
+    missing_df = pd.concat([n_miss, np.round(ratio, 2)], axis=1, keys=["n_miss", "ratio"])
+    print(missing_df, end="\n")
+    if na_name:
+        return na_cols
+
+na_cols = missing_values_table(df, True)
+
+# Now we will examine whether the missing values have a relationship with the dependent variable 
+
+def missing_vs_target(dataframe, target, na_columns):
+    temp_df = dataframe.copy()
+    for col in na_columns:
+        temp_df[col + "_NA_FLAG"] = np.where(temp_df[col].isnull(), 1, 0)
+    na_flags = temp_df.loc[:, temp_df.columns.str.contains("_NA_")].columns
+    for col in na_flags:
+        print(pd.DataFrame({"TARGET_MEAN": temp_df.groupby(col)[target].mean(),
+                           "Count": temp_df.groupby(col)[target].count()}), end="\n\n\n")
+        
+# Skin Thickness and Insulin variables being NaN does not affect the average much
+# The averages in Glucose and BMI variables are different, but there are fewer NaN variables
+missing_vs_target(df, "Outcome", na_cols)
+
+# we assigned the mean glucose concentration of patients without diabetes (Outcome=0) to 
+# patients without diabetes but with missing glucose values
+df.loc[(df["Glucose"].isnull()) & (df["Outcome"]==0), "Glucose"] = df.groupby("Outcome")["Glucose"].mean()[0]
+
+# we assigned the mean glucose concentration of patients with diabetes (Outcome=1) to 
+# patients with diabetes but missing glucose value
+df.loc[(df["Glucose"].isnull()) & (df["Outcome"]==1), "Glucose"] = df.groupby("Outcome")["Glucose"].mean()[1]
+
+# we applied the above method to all na_cols containing NaN
+for col in na_cols:
+    df.loc[(df[col].isnull()) & (df["Outcome"]==0), col] = df.groupby("Outcome")[col].mean()[0]
+    df.loc[(df[col].isnull()) & (df["Outcome"]==1), col] = df.groupby("Outcome")[col].mean()[1]
+
+df.isnull().sum()
+
+# Step 3: Outliers
+
+def outlier_thresholds(dataframe, col_name, q1=0.05, q3=0.95):
+    quartile1 = dataframe[col_name].quantile(q1)
+    quartile3 = dataframe[col_name].quantile(q3)
+    interquartile_range = quartile3 - quartile1
+    up_limit = quartile3 + interquartile_range*1.5
+    low_limit = quartile1 - interquartile_range*1.5
+    return low_limit, up_limit
+
+def check_outliers(dataframe, col_name):
+    low_limit, up_limit = outlier_thresholds(dataframe, col_name)
+    if dataframe[(dataframe[col_name] < low_limit) | (df[col_name] > up_limit)].any(axis=None):
+        return True
+    else:
+        return False
+    
+for col in num_cols:
+    print(col, check_outliers(df, col))
+
+def replace_with_thresholds(dataframe, col_name):
+    low_limit, up_limit = outlier_thresholds(df, col_name)
+    dataframe.loc[(dataframe[col_name] < low_limit), col_name] = low_limit
+    dataframe.loc[(dataframe[col_name] > up_limit), col_name]= up_limit
+    
+# we replaced outliers in numeric columns with threshold
+for col in num_cols:
+    replace_with_thresholds(df, col)
+    
+# replaced with threshold so that there are no outliers in any numeric variable
+for col in num_cols:
+    print(col, check_outliers(df, col))
+
+# Step 4: New Variables
+
+# Categorizing the age variable and creating a new age variable
+df.loc[(df["Age"] < 21), "AGE_CAT"] = "young"
+df.loc[(df["Age"] >= 21) & (df["Age"] < 50), "AGE_CAT"] = "mature"
+df.loc[(df["Age"] >= 50), "AGE_CAT"] = "senior"
+
+# BMI below 18.5 is Underweight, between 18.5 and 24.9 is Normal, between 24.9 and 29.9 is Overweight and above 30 is Obese
+df['BMI_CAT'] = pd.cut(x=df['BMI'], bins=[0, 18.5, 24.9, 29.9, 100],labels=["Underweight", "Healthy", "Overweight", "Obese"])
+
+# Convert glucose value to a categorical variable
+df["GLUCOSE_CAT"] = pd.cut(x=df["Glucose"], bins=[0, 140, 200, 300], 
+                           labels=["Normal", "Prediabetes", "Diabetes"])
+
+# Creating a categorical variable by considering age and body mass index together
+df.loc[(df["BMI"] < 18.5) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_BMI_CAT"] = "underweightmature"
+df.loc[(df["BMI"] < 18.5) & (df["Age"] >= 50), "AGE_BMI_CAT"] = "underweightsenior"
+df.loc[((df["BMI"] >= 18.5) & (df["BMI"] < 25)) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_BMI_CAT"] = "healthymature"
+df.loc[((df["BMI"] >= 18.5) & (df["BMI"] < 25)) & (df["Age"] >= 50), "AGE_BMI_CAT"] = "healthysenior"
+df.loc[((df["BMI"] >= 25) & (df["BMI"] < 30)) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_BMI_CAT"] = "overweightmature"
+df.loc[((df["BMI"] >= 25) & (df["BMI"] < 30)) & (df["Age"] >= 50), "AGE_BMI_CAT"] = "overweightsenior"
+df.loc[(df["BMI"] > 18.5) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_BMI_CAT"] = "obesemature"
+df.loc[(df["BMI"] > 18.5) & (df["Age"] >= 50), "AGE_BMI_CAT"] = "obesesenior"
+
+# Creating a categorical variable by considering Age and Glucose values together
+df.loc[(df["Glucose"] < 70) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_GLUCOSE_CAT"] = "lowmature"
+df.loc[(df["Glucose"] < 70) & (df["Age"] >= 50), "AGE_GLUCOSE_CAT"] = "lowsenior"
+df.loc[((df["Glucose"] >= 70) & (df["Glucose"] < 100)) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_GLUCOSE_CAT"] = "normalmature"
+df.loc[((df["Glucose"] >= 70) & (df["Glucose"] < 100)) & (df["Age"] >= 50), "AGE_GLUCOSE_CAT"] = "normalsenior"
+df.loc[((df["Glucose"] >= 100) & (df["Glucose"] <= 125)) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_GLUCOSE_CAT"] = "hiddenmature"
+df.loc[((df["Glucose"] >= 100) & (df["Glucose"] <= 125)) & (df["Age"] >= 50), "AGE_GLUCOSE_CAT"] = "hiddensenior"
+df.loc[(df["Glucose"] > 125) & ((df["Age"] >= 21) & (df["Age"] < 50)), "AGE_GLUCOSE_CAT"] = "highmature"
+df.loc[(df["Glucose"] > 125) & (df["Age"] >= 50), "AGE_GLUCOSE_CAT"] = "highsenior"
+
+# Derive Categorical variable with Insulin Value
+def set_insulin(dataframe, col_name="Insulin"):
+    if 16 <= dataframe[col_name] <= 166:
+        return "Normal"
+    else:
+        return "Abnormal"
+
+df["INSULIN_SCORE"] = df.apply(set_insulin, axis=1)
+
+df["GLUCOSE*INSULIN"] = df["Glucose"] * df["Insulin"]
+
+df["GLUCOSE*PREGNANCIES"] = df["Glucose"] * df["Pregnancies"]
+
+Step 5: Encoding
+
+# our number of variables is now 17
+cat_cols, num_cols, cat_but_car_cols = grab_col_names(df)
+
+# performing label encoding
+
+binary_cols = [col for col in df.columns if df[col].dtype == "O" and df[col].nunique() == 2]
+
+def label_encoder(dataframe, binary_col):
+    labelencoder = LabelEncoder()
+    dataframe[binary_col] = labelencoder.fit_transform(dataframe[binary_col])
+    return dataframe
+
+for col in binary_cols:
+    label_encoder(df, col)
+    
+df.head()
+
+# performing one-hot encoding
+
+ohe_cols = [col for col in cat_cols if col not in binary_cols and col not in ["Outcome"]] 
+ohe_cols
+
+def one_hot_encoder(dataframe, categorical_cols, drop_first=False):
+    dataframe = pd.get_dummies(dataframe, columns=categorical_cols, drop_first=drop_first)
+    return dataframe
+
+df = one_hot_encoder(df, ohe_cols, drop_first=True)
+
+Step 6: Standardization of numeric variables.
+
+num_cols = [col for col in df.columns if df[col].dtype != "O"]
+
+scaler = RobustScaler()
+df[num_cols] = scaler.fit_transform(df[num_cols])
+df.head()
+
+Step 7: Machine Learning Model
+
+# if we had entered the unprocessed data set (df2) into the model, our score would have been 77
+
+df2 = load_diabetes()
+
+y = df2["Outcome"]  # bağımlı değişken
+X = df2.drop(["Outcome"], axis=1) # iki değişken hariç kalanları bağımsız değişken
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.30, random_state=17)
+
+from sklearn.ensemble import RandomForestClassifier
+rf_model = RandomForestClassifier(random_state=46).fit(X_train, y_train)
+y_pred = rf_model.predict(X_test)
+
+print(f"Accuracy: {round(accuracy_score(y_pred, y_test), 2)}")
+
+# When we put our preprocessed dataset into the model, our score was 86
+
+y = df["Outcome"]  # bağımlı değişken
+X = df.drop(["Outcome"], axis=1) # iki değişken hariç kalanları bağımsız değişken
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.30, random_state=17)
+
+from sklearn.ensemble import RandomForestClassifier
+rf_model = RandomForestClassifier(random_state=46).fit(X_train, y_train)
+y_pred = rf_model.predict(X_test)
+accuracy_score(y_pred, y_test)
+
+# so if I am given the information of these patients, 
+# I can estimate whether 86% of these patients have diabetes or not
+
+# we will use the feature_importance function, which is a ready-made function
+# to see the status of the New Variables that we generate later
+
+def plot_importance(model, features, num=len(X), save=False):
+    feature_imp = pd.DataFrame({"Value": model.feature_importances_, "Feature": features.columns})
+    plt.figure(figsize=(10, 10))
+    sns.set(font_scale=1)
+    sns.barplot(x="Value", y="Feature", data=feature_imp.sort_values(by="Value",
+                                                                    ascending=False)[0:num])
+    plt.title("Features")
+    plt.tight_layout()
+    plt.show()
+    if save:
+        plt.savefig("importances.png")
+
+plot_importance(rf_model, X_train)
+
+# From this graph it seems that glucose concentration and glucose*insulin variables are more important than other variables
